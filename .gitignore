@@ -1,4 +1,3 @@
-bin/
-dlock/VERSION
-include/
-lib/
+python-gevent/*.pyc
+python-gevent/dlock/VERSION
+python-gevent/venv/
