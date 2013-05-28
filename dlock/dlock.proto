@@ -1,0 +1,47 @@
+package dlock;
+
+enum RequestType {
+	Ping = 1;
+	Lock = 2;
+//	Unlock = 3;
+}
+
+enum ResponseStatus {
+	// Error codes:
+	// 1-99: protocol level errors
+	// 100-119: [lock] input validation errors
+	// 120-139: [lock] response errors for valid input
+	Ok = 0;
+	General = 1; // generic error, read message for details
+	Version = 2; // incompatible request version
+	InvalidType = 3; // unknown request type
+
+	// Lock 100-199
+	TooManyKeys = 100;
+	AcquireTimeout = 120;
+}
+
+message Request {
+	optional uint32 version = 1 [default = 2];
+	optional uint64 id = 2;
+	optional string access_token = 3;
+	optional RequestType type = 4;
+
+	// Ping is empty
+	optional RequestLock lock = 51;
+	// optional RequestUnlock unlock = 52;
+}
+
+message Response {
+	optional uint32 version = 1 [default = 2];
+	optional uint64 request_id = 2;
+	optional ResponseStatus status = 3;
+	optional string error_text = 4;
+	repeated string keys = 5;
+}
+
+message RequestLock {
+	optional uint64 wait_micro = 1;
+	optional uint64 release_micro = 2;
+	repeated string keys = 3;
+}

@@ -10,66 +10,77 @@ dlock client connects to server, sends a lock acquiring request, optionally wait
 How
 ===
 
-Client-server speak very simple protocol built on tnetstring [2] frames on top of TCP. Pipelining many requests before reading response is perfectly fine. Responses come in the order of requests.
+Client-server speak very simple protocol built on Protocol Buffers [2] frames on top of TCP. Pipelining many requests before reading response is perfectly fine. Responses come in the order of requests.
 
 Protocol:
 
-	Lock request:
+    Length-prefixed protocol buffers. Length prefix is 4 bytes, big endian binary encoding.
 
-    [API version, 'lock', wait, release after, keys]
+    message Request {
+        optional uint32 version = 1 [default = 2];
+        optional uint64 id = 2;
+        optional string access_token = 3;
+        optional RequestType type = 4;
 
-    API version - int. As of 2012-04-04, latest version is 1.
-    wait - float, >= 0
-    release after - false | float > 0
-    key - string
+        // Ping is empty
+        optional RequestLock lock = 51;
+        // optional RequestUnlock unlock = 52;
+    }
 
-    Supplied keys are locked until client disconnects or for `release after` seconds. If release timeout is supplied, disconnect does not do anything.
+    message Response {
+        optional uint32 version = 1 [default = 2];
+        optional uint64 request_id = 2;
+        optional ResponseStatus status = 3;
+        optional string error_text = 4;
+        repeated string keys = 5;
+    }
 
-    Success response:
-    ["ok"]
+    As of 2013-05-28, API version is 2.
 
-    Wait timeout response:
-    ["error", 120, "Acquire timeout", list of keys not locked]
+    Lock request:
 
-    Other error response:
-    ["error", code, message[, data] ]
+    `type = Lock`
 
-    code - int
-    message - string
+    message RequestLock {
+        optional uint64 wait_micro = 1;
+        optional uint64 release_micro = 2;
+        repeated string keys = 3;
+    }
+
+    Supplied keys are locked until client disconnects or for `release_micro` microseconds. If release timeout is supplied, disconnect does not do anything. If some of specified keys are already locked, this command will block for at most `wait_micro` microseconds before returning response with `AcquireTimeout` status.
 
 
     Ping request:
 
-    [API version, 'ping']
+    `type = Ping`
 
-    Success response:
-    ["ok"]
+    Response is always `Ok`. Clients should send pings periodically to inform server they are alive. Otherwise the server will disconnect them with suspection of failure and release their locks.
 
 
-Error codes:
+    enum RequestType {
+        Ping = 1;
+        Lock = 2;
+    //  Unlock = 3;
+    }
 
-1-99: protocol level errors
-100-119: [lock] input validation errors
-120-139: [lock] response errors for valid input
+    enum ResponseStatus {
+        // Error codes:
+        // 1-99: protocol level errors
+        // 100-119: [lock] input validation errors
+        // 120-139: [lock] response errors for valid input
+        Ok = 0;
+        General = 1; // generic error, read message for details
+        Version = 2; // incompatible request version
+        InvalidType = 3; // unknown request type
 
-More specifically:
-
-1: generic error, read message for details
-2: unsupported API version
-3: unknown message type (command)
-4: invalid number of arguments for given message type
-
-Lock command:
-
-100: invalid wait timeout
-101: invalid release timeout
-102: too many keys
-103: some keys are not strings
-120: acquire timeout
+        // Lock 100-199
+        TooManyKeys = 100;
+        AcquireTimeout = 120;
+    }
 
 
 References
 ==========
 
 [1] http://en.wikipedia.org/wiki/Distributed_lock_manager
-[2] http://tnetstrings.org/
+[2] https://code.google.com/p/protobuf/
