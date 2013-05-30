@@ -3,8 +3,10 @@ package main
 import (
 	"flag"
 	"github.com/temoto/dlock/dlock"
+	"log"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 )
@@ -21,6 +23,9 @@ func main() {
 	)
 	flag.Parse()
 
+	// Set number of parallel threads to number of CPUs.
+	runtime.GOMAXPROCS(runtime.NumCPU())
+
 	dlock.Debug = *flagDebug
 
 	server := NewServer(*flagBind, *flagIdleTimeout)
@@ -29,6 +34,11 @@ func main() {
 	server.ConfigReadBuffer = *flagReadBuffer
 	server.ConfigReadTimeout = *flagReadTimeout
 	server.ConfigWriteTimeout = *flagWriteTimeout
+
+	if *flagDebug {
+		log.SetFlags(log.Flags() | log.Lmicroseconds)
+	}
+
 	listenCount := server.Start()
 	if listenCount == 0 {
 		os.Exit(1)
@@ -38,6 +48,9 @@ func main() {
 	signal.Notify(sigIntChan, syscall.SIGINT)
 	go func() {
 		<-sigIntChan
+		if server.ConfigDebug {
+			log.Printf("main: goroutines=%d", runtime.NumGoroutine())
+		}
 		server.Close()
 	}()
 

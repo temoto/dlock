@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"github.com/temoto/dlock/dlock"
 	"log"
 	"net"
@@ -29,6 +30,8 @@ type Server struct {
 }
 
 var (
+	ErrorLockWaitAbort = errors.New("LockWaitAbort")
+
 	ErrorIdleTimeout = errors.New("IdleTimeout")
 	ErrorReadTimeout = errors.New("ReadTimeout")
 )
@@ -57,17 +60,17 @@ func (server *Server) Start() int {
 
 		tcpAddr, err := net.ResolveTCPAddr("tcp", address)
 		if err != nil {
-			log.Printf("Server.Start: ResolveTCPAddr: '%s' error: %s\n",
+			log.Printf("Server.Start: ResolveTCPAddr: '%s' error: %s",
 				address, err.Error())
 			continue
 		}
 		listener, err := net.ListenTCP("tcp", tcpAddr)
 		if err != nil {
-			log.Printf("Server.Start: Error listening on '%s': %s\n", address, err.Error())
+			log.Printf("Server.Start: Error listening on '%s': %s", address, err.Error())
 			continue
 		}
 		if server.ConfigDebug {
-			log.Printf("Server.Start: bind to %s\n", listener.Addr().String())
+			log.Printf("Server.Start: bind to %s", listener.Addr().String())
 		}
 
 		server.listeners = append(server.listeners, listener)
@@ -92,71 +95,67 @@ func (server *Server) Wait() {
 	server.wg.Wait()
 }
 
-func (server *Server) get(key string) (*KeyLock, bool) {
+func (server *Server) addConnection(tcpConn *net.TCPConn) *Connection {
+	clientId := tcpConn.RemoteAddr().String()
+
 	server.lk.Lock()
-	kl, ok := server.keyLocks[key]
+	if _, ok := server.clientLocks[clientId]; ok {
+		log.Printf("Server.listenLoop: duplicate clientId: %s", clientId)
+		return nil
+	}
+	server.clientLocks[clientId] = []string{}
 	server.lk.Unlock()
-	return kl, ok
+
+	if err := server.setupSocket(tcpConn); err != nil {
+		log.Printf("Server.listenLoop: %s setupSocket error: %s", clientId, err.Error())
+		return nil
+	}
+
+	conn := NewConnection(server, clientId)
+	conn.handlers = map[dlock.RequestType]HandlerFunc{
+		dlock.RequestType_Ping: handlePing,
+		dlock.RequestType_Lock: handleLock,
+	}
+	conn.funClose = tcpConn.Close
+	conn.funResetIdleTimeout = func() error { return tcpConn.SetReadDeadline(time.Now().Add(server.ConfigIdleTimeout)) }
+	conn.funResetReadTimeout = func() error { return tcpConn.SetReadDeadline(time.Now().Add(server.ConfigReadTimeout)) }
+	conn.funResetWriteTimeout = func() error { return tcpConn.SetWriteDeadline(time.Now().Add(server.ConfigWriteTimeout)) }
+	if server.ConfigDebug {
+		log.Printf("Server.listenLoop: new conn: %s", conn.clientId)
+	}
+
+	if server.ConfigReadBuffer == 0 {
+		conn.r = bufio.NewReader(tcpConn)
+	} else {
+		conn.r = bufio.NewReaderSize(tcpConn, int(server.ConfigReadBuffer))
+	}
+	conn.w = bufio.NewWriter(tcpConn)
+
+	server.wg.Add(1)
+	go conn.loop()
+
+	return conn
 }
 
 func (server *Server) listenLoop(l *net.TCPListener) {
 	defer server.wg.Done()
 	for {
 		tcpConn, err := l.AcceptTCP()
-
-		server.lk.Lock()
 		if server.isClosed {
 			break
 		}
-		server.lk.Unlock()
-
 		if err != nil {
-			log.Printf("Server.listenLoop: Accept() error: %s\n", err.Error())
+			log.Printf("Server.listenLoop: Accept() error: %s", err.Error())
 			break
 		}
 
-		connection := &Connection{
-			clientId: tcpConn.RemoteAddr().String(),
-			handlers: map[dlock.RequestType]HandlerFunc{
-				dlock.RequestType_Ping: handlePing,
-				dlock.RequestType_Lock: handleLock,
-			},
-			server: server,
-
-			funClose:             tcpConn.Close,
-			funResetIdleTimeout:  func() error { return tcpConn.SetReadDeadline(time.Now().Add(server.ConfigIdleTimeout)) },
-			funResetReadTimeout:  func() error { return tcpConn.SetReadDeadline(time.Now().Add(server.ConfigReadTimeout)) },
-			funResetWriteTimeout: func() error { return tcpConn.SetWriteDeadline(time.Now().Add(server.ConfigWriteTimeout)) },
-		}
-		if server.ConfigDebug {
-			log.Printf("Server.listenLoop: new connection: %s\n", connection.clientId)
-		}
-
-		if socket, err := tcpConn.File(); err != nil {
-			log.Printf("Server.listenLoop: %s error: %s\n", connection.clientId, err.Error())
-			return
-		} else {
-			connection.socketFd = socket.Fd()
-		}
-		if err := server.setupSocket(tcpConn); err != nil {
-			log.Printf("Server.listenLoop: %s setupSocket error: %s\n", connection.clientId, err.Error())
-			return
-		}
-
-		if server.ConfigReadBuffer == 0 {
-			connection.r = bufio.NewReader(tcpConn)
-		} else {
-			connection.r = bufio.NewReaderSize(tcpConn, int(server.ConfigReadBuffer))
-		}
-		connection.w = bufio.NewWriter(tcpConn)
-
-		server.wg.Add(1)
-		go connection.loop()
+		server.addConnection(tcpConn)
 	}
 }
 
 func (server *Server) lockKeys(keys []string, keyLock *KeyLock, timeout time.Duration) ([]string, error) {
-	log.Printf("Server.lockKeys: < %s", *keyLock.ClientId)
+	defer server.profileTime(fmt.Sprintf("Server.lockKeys keys='%s' client=%s expires=%s timeout=%s",
+		strings.Join(keys, " "), *keyLock.ClientId, keyLock.Expires, timeout), time.Now())
 	abort := false
 	busyKeys := make([]string, 0, len(keys))
 	result := make(chan error, 3)
@@ -174,24 +173,38 @@ func (server *Server) lockKeys(keys []string, keyLock *KeyLock, timeout time.Dur
 	}
 
 	try := func() bool {
+		if server.ConfigDebug {
+			log.Printf("Server.lockKeys.try keys='%s' client=%s",
+				strings.Join(keys, " "), *keyLock.ClientId)
+		}
 		server.lk.Lock()
 		defer server.lk.Unlock()
 		if abort {
 			return false
 		}
-		log.Printf("Server.lockKeys.try <")
+
+		// Client has disconnected; stop trying.
+		if _, ok := server.clientLocks[*keyLock.ClientId]; !ok {
+			log.Printf("Server.lockKeys.try keys='%s' client=%s disconnected",
+				strings.Join(keys, " "), *keyLock.ClientId)
+			abort = true
+			return false
+		}
 
 		// Since we don't have transactional memory,
-		// first: check if all requested keys are free
+		// first, check if all requested keys are free
 		busyKeys = busyKeys[:0]
+		now := time.Now()
 		for _, key := range keys {
-			if kl, ok := server.keyLocks[key]; ok && !kl.IsSameClient(keyLock) {
+			if kl, ok := server.unsafeTouchKey(key, &now); ok {
+				if kl.IsSameClient(keyLock) {
+					continue
+				}
 				busyKeys = append(busyKeys, key)
 				someBusyKeyLock = kl
 				continue
 			}
 		}
-		log.Printf("Server.lockKeys.try: busykeys: %v", busyKeys)
 		if len(busyKeys) > 0 {
 			return true
 		}
@@ -199,12 +212,13 @@ func (server *Server) lockKeys(keys []string, keyLock *KeyLock, timeout time.Dur
 		// Then actually lock them.
 		clientLocks, _ := server.clientLocks[*keyLock.ClientId]
 		for _, key := range keys {
-			keyLock.wg.Add(1)
+			keyLock.CancelWait()
 
 			server.keyLocks[key] = keyLock
 
-			// FIXME: check for dups
-			clientLocks = append(clientLocks, key)
+			if stringListFind(clientLocks, key) == -1 {
+				clientLocks = append(clientLocks, key)
+			}
 		}
 		server.clientLocks[*keyLock.ClientId] = clientLocks
 
@@ -223,6 +237,7 @@ func (server *Server) lockKeys(keys []string, keyLock *KeyLock, timeout time.Dur
 				time.Sleep(delayPoll)
 			}
 		}
+		result <- ErrorLockWaitAbort
 	}
 
 	if timeout != 0 {
@@ -234,31 +249,39 @@ func (server *Server) lockKeys(keys []string, keyLock *KeyLock, timeout time.Dur
 	return busyKeys, err
 }
 
-func (server *Server) releaseClient(clientId string) {
+func (server *Server) profileTime(tag string, t1 time.Time) {
+	d := time.Now().Sub(t1)
 	if server.ConfigDebug {
-		log.Printf("Server.releaseClient %s", clientId)
+		log.Printf("%s time=%s", tag, d)
 	}
-	server.lk.Lock()
-	keys, _ := server.clientLocks[clientId]
-	delete(server.clientLocks, clientId)
-	server.lk.Unlock()
-
-	server.releaseKeys(keys)
 }
 
-func (server *Server) releaseKeys(keys []string) {
+func (server *Server) releaseClient(clientId *string) []string {
+	if server.ConfigDebug {
+		log.Printf("Server.releaseClient: %s", *clientId)
+	}
+	server.lk.Lock()
+	keys, _ := server.clientLocks[*clientId]
+	delete(server.clientLocks, *clientId)
+	server.lk.Unlock()
+
+	server.releaseKeys(keys, nil)
+
+	return keys
+}
+
+// With expire == nil would only remove keys that have Expires == nil
+// otherwise would remove keys whoose Expires is less than the one passed.
+func (server *Server) releaseKeys(keys []string, expire *time.Time) {
 	if len(keys) == 0 {
 		return
 	}
 
 	server.lk.Lock()
+	defer server.lk.Unlock()
 	for _, key := range keys {
-		if kl, ok := server.keyLocks[key]; ok {
-			kl.wg.Done()
-		}
-		delete(server.keyLocks, key)
+		server.unsafeTouchKey(key, expire)
 	}
-	server.lk.Unlock()
 }
 
 func (server *Server) setupSocket(conn *net.TCPConn) (err error) {
@@ -277,4 +300,45 @@ func (server *Server) setupSocket(conn *net.TCPConn) (err error) {
 		return
 	}
 	return
+}
+
+// This function must be called while holding server.lk lock.
+func (server *Server) unsafeDeleteKey(key string, kl *KeyLock) {
+	if server.ConfigDebug {
+		log.Printf("Server.unsafeDeleteKey key=%s kl.Expires=%s",
+			key, kl.Expires)
+	}
+	delete(server.keyLocks, key)
+	if kl != nil {
+		if clientLocks, ok := server.clientLocks[*kl.ClientId]; ok {
+			clientLocks = stringListRemove(clientLocks, key)
+			if len(clientLocks) > 0 {
+				server.clientLocks[*kl.ClientId] = clientLocks
+			} else {
+				delete(server.clientLocks, *kl.ClientId)
+			}
+		}
+		kl.Release()
+	}
+}
+
+// Releases the key if it is expired.
+// This function must be called while holding server.lk lock.
+func (server *Server) unsafeTouchKey(key string, expire *time.Time) (*KeyLock, bool) {
+	if kl, ok := server.keyLocks[key]; ok {
+		if server.ConfigDebug {
+			log.Printf("Server.unsafeTouchKey key=%s expire=%s found; kl.Expires=%s",
+				key, expire, kl.Expires)
+		}
+		if expire == nil && kl.Expires.IsZero() {
+			server.unsafeDeleteKey(key, kl)
+			return nil, false
+		}
+		if expire != nil && !kl.Expires.IsZero() && expire.Sub(kl.Expires) >= 0 {
+			server.unsafeDeleteKey(key, kl)
+			return nil, false
+		}
+		return kl, true
+	}
+	return nil, false
 }

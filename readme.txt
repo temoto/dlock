@@ -33,6 +33,7 @@ Protocol:
         optional ResponseStatus status = 3;
         optional string error_text = 4;
         repeated string keys = 5;
+        optional int64 server_unix_time = 6; // Unix timestamp
     }
 
     As of 2013-05-28, API version is 2.

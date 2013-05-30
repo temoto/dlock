@@ -20,7 +20,7 @@ func TestFunctionalLock01(t *testing.T) {
 
 	n := server.Start()
 	if n != 1 {
-		t.Fatalf("Server.Start() = %d\n", n)
+		t.Fatal("Server.Start():", n)
 	}
 
 	conn1, err := net.Dial("tcp", server.listeners[0].Addr().String())

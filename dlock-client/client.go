@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"github.com/temoto/dlock/dlock"
+	"log"
 	"net"
+	"strings"
 	"time"
 )
 
@@ -40,11 +42,15 @@ func NewClient(connect string, timeout time.Duration) *Client {
 	}
 }
 
-func (c *Client) Close() {
-	c.tcpConn.Close()
+func (c *Client) Close(linger int) (err error) {
+	if err = c.tcpConn.SetLinger(linger); err != nil {
+		return err
+	}
+	return c.tcpConn.Close()
 }
 
 func (c *Client) Connect() error {
+	defer c.profileTime("Client.Connect", time.Now())
 	conn, err := net.DialTimeout("tcp", c.ConfigConnect, c.ConfigConnectTimeout)
 	if err != nil {
 		return err
@@ -71,6 +77,24 @@ func (c *Client) Connect() error {
 }
 
 func (c *Client) Lock(keys []string, wait, release time.Duration) (err error) {
+	defer c.profileTime("Client.Lock", time.Now())
+
+	if wait != 0 {
+		ch := make(chan error, 1)
+		go func() { ch <- c.lock(keys, wait, release) }()
+		select {
+		case err = <-ch:
+		case <-time.After(wait):
+			err = dlock.ErrorLockAcquireTimeout
+			c.Close(0)
+		}
+	} else {
+		err = c.lock(keys, wait, release)
+	}
+	return err
+}
+
+func (c *Client) lock(keys []string, wait, release time.Duration) (err error) {
 	if c.tcpConn == nil {
 		if err = c.Connect(); err != nil {
 			return err
@@ -107,6 +131,7 @@ func (c *Client) Lock(keys []string, wait, release time.Duration) (err error) {
 }
 
 func (c *Client) Ping() (err error) {
+	defer c.profileTime("Client.Ping", time.Now())
 	if c.tcpConn == nil {
 		if err = c.Connect(); err != nil {
 			return err
@@ -133,4 +158,22 @@ func (c *Client) Ping() (err error) {
 	}
 
 	return nil
+}
+
+func (c *Client) profileTime(tag string, t1 time.Time) {
+	d := time.Now().Sub(t1)
+	if c.ConfigDebug {
+		log.Printf("%s time=%s", tag, d)
+	}
+}
+
+func (c *Client) parseKeys(in string) []string {
+	out := make([]string, 0, len(in)/10)
+	for _, key := range strings.Split(in, " ") {
+		key = strings.TrimSpace(key)
+		if len(key) > 0 {
+			out = append(out, key)
+		}
+	}
+	return out
 }

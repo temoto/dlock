@@ -153,6 +153,7 @@ type Response struct {
 	Status           *ResponseStatus `protobuf:"varint,3,opt,name=status,enum=dlock.ResponseStatus" json:"status,omitempty"`
 	ErrorText        *string         `protobuf:"bytes,4,opt,name=error_text" json:"error_text,omitempty"`
 	Keys             []string        `protobuf:"bytes,5,rep,name=keys" json:"keys,omitempty"`
+	ServerUnixTime   *int64          `protobuf:"varint,6,opt,name=server_unix_time" json:"server_unix_time,omitempty"`
 	XXX_unrecognized []byte          `json:"-"`
 }
 
@@ -195,6 +196,13 @@ func (m *Response) GetKeys() []string {
 		return m.Keys
 	}
 	return nil
+}
+
+func (m *Response) GetServerUnixTime() int64 {
+	if m != nil && m.ServerUnixTime != nil {
+		return *m.ServerUnixTime
+	}
+	return 0
 }
 
 type RequestLock struct {
