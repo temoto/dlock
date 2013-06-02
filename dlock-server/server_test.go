@@ -14,14 +14,50 @@ func assertNil(err error) {
 	}
 }
 
-func TestFunctionalLock01(t *testing.T) {
-	server := NewServer(":0", 10*time.Millisecond)
+func initTestServer(t *testing.T, timeout time.Duration) *Server {
+	server := NewServer(":0", timeout)
 	server.ConfigDebug = true
 
 	n := server.Start()
 	if n != 1 {
-		t.Fatal("Server.Start():", n)
+		t.Fatal("initTestServer: expected 1 listener, Server.Start():", n)
 	}
+
+	return server
+}
+
+func TestDuplicateClient(t *testing.T) {
+	server := initTestServer(t, 10*time.Millisecond)
+
+	netConn, err := net.Dial("tcp", server.listeners[0].Addr().String())
+	assertNil(err)
+	tcpConn := netConn.(*net.TCPConn)
+
+	// Let the server accept new connection
+	time.Sleep(1 * time.Millisecond)
+
+	if server.addConnection(tcpConn) == nil {
+		t.Fatal("Must add connection first time")
+	}
+	if server.addConnection(tcpConn) != nil {
+		t.Fatal("Must not add same connection twice")
+	}
+
+	ch := make(chan bool)
+	go func() {
+		server.Close()
+		server.Wait()
+		ch <- true
+	}()
+	select {
+	case <-ch:
+	case <-time.After(11 * time.Millisecond):
+		t.Fatal("Close timeout. Deadlock?")
+	}
+}
+
+func TestFunctionalLock01(t *testing.T) {
+	server := initTestServer(t, 10*time.Millisecond)
 
 	conn1, err := net.Dial("tcp", server.listeners[0].Addr().String())
 	assertNil(err)

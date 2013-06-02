@@ -30,7 +30,8 @@ type Server struct {
 }
 
 var (
-	ErrorLockWaitAbort = errors.New("LockWaitAbort")
+	ErrorDuplicateClient = errors.New("DuplicateClient")
+	ErrorLockWaitAbort   = errors.New("LockWaitAbort")
 
 	ErrorIdleTimeout = errors.New("IdleTimeout")
 	ErrorReadTimeout = errors.New("ReadTimeout")
@@ -45,6 +46,17 @@ func NewServer(bind string, timeout time.Duration) *Server {
 		ConfigMaxMessage:   16 << 10, // 16KB
 		clientLocks:        make(map[string][]string),
 		keyLocks:           make(map[string]*KeyLock),
+	}
+}
+
+func (server *Server) Close() {
+	server.lk.Lock()
+	defer server.lk.Unlock()
+	if !server.isClosed {
+		server.isClosed = true
+		for _, listener := range server.listeners {
+			listener.Close()
+		}
 	}
 }
 
@@ -80,34 +92,25 @@ func (server *Server) Start() int {
 	return len(server.listeners)
 }
 
-func (server *Server) Close() {
-	server.lk.Lock()
-	defer server.lk.Unlock()
-	if !server.isClosed {
-		server.isClosed = true
-		for _, listener := range server.listeners {
-			listener.Close()
-		}
-	}
-}
-
 func (server *Server) Wait() {
 	server.wg.Wait()
 }
 
 func (server *Server) addConnection(tcpConn *net.TCPConn) *Connection {
 	clientId := tcpConn.RemoteAddr().String()
+	var err error
+	if server.ConfigDebug {
+		log.Printf("Server.addConnection: %s", clientId)
+	}
 
-	server.lk.Lock()
-	if _, ok := server.clientLocks[clientId]; ok {
-		log.Printf("Server.listenLoop: duplicate clientId: %s", clientId)
+	// TODO: set expected clientLocks to average+1
+	if err = server.initClientLocks(clientId, 1); err != nil {
+		log.Printf("Server.addConnection: %s %s", clientId, err.Error())
 		return nil
 	}
-	server.clientLocks[clientId] = []string{}
-	server.lk.Unlock()
 
 	if err := server.setupSocket(tcpConn); err != nil {
-		log.Printf("Server.listenLoop: %s setupSocket error: %s", clientId, err.Error())
+		log.Printf("Server.addConnection: %s setupSocket error: %s", clientId, err.Error())
 		return nil
 	}
 
@@ -120,9 +123,6 @@ func (server *Server) addConnection(tcpConn *net.TCPConn) *Connection {
 	conn.funResetIdleTimeout = func() error { return tcpConn.SetReadDeadline(time.Now().Add(server.ConfigIdleTimeout)) }
 	conn.funResetReadTimeout = func() error { return tcpConn.SetReadDeadline(time.Now().Add(server.ConfigReadTimeout)) }
 	conn.funResetWriteTimeout = func() error { return tcpConn.SetWriteDeadline(time.Now().Add(server.ConfigWriteTimeout)) }
-	if server.ConfigDebug {
-		log.Printf("Server.listenLoop: new conn: %s", conn.clientId)
-	}
 
 	if server.ConfigReadBuffer == 0 {
 		conn.r = bufio.NewReader(tcpConn)
@@ -135,6 +135,18 @@ func (server *Server) addConnection(tcpConn *net.TCPConn) *Connection {
 	go conn.loop()
 
 	return conn
+}
+
+func (server *Server) initClientLocks(clientId string, cap int) error {
+	server.lk.Lock()
+	defer server.lk.Unlock()
+
+	if _, ok := server.clientLocks[clientId]; ok {
+		return ErrorDuplicateClient
+	}
+	server.clientLocks[clientId] = make([]string, 0, cap)
+
+	return nil
 }
 
 func (server *Server) listenLoop(l *net.TCPListener) {
