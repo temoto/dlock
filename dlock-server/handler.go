@@ -54,3 +54,17 @@ func handleLock(conn *Connection, request *dlock.Request) {
 
 	conn.Wch <- response
 }
+
+func handleUnlock(conn *Connection, request *dlock.Request) {
+	response := commonResponse(conn, request)
+	if request.Lock == nil || len(request.Lock.Keys) == 0 {
+		response.Status = dlock.ResponseStatus_General
+		conn.Wch <- response
+		return
+	}
+
+	expire := conn.LastRequestTime
+	conn.server.releaseKeys(request.Lock.Keys, &expire)
+
+	conn.Wch <- response
+}

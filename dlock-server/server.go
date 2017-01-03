@@ -116,8 +116,9 @@ func (server *Server) addConnection(tcpConn *net.TCPConn) *Connection {
 
 	conn := NewConnection(server, clientId)
 	conn.handlers = map[dlock.RequestType]HandlerFunc{
-		dlock.RequestType_Ping: handlePing,
-		dlock.RequestType_Lock: handleLock,
+		dlock.RequestType_Ping:   handlePing,
+		dlock.RequestType_Lock:   handleLock,
+		dlock.RequestType_Unlock: handleUnlock,
 	}
 	conn.funClose = tcpConn.Close
 	conn.funResetIdleTimeout = func() error { return tcpConn.SetReadDeadline(time.Now().Add(server.ConfigIdleTimeout)) }

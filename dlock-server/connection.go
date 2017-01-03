@@ -22,6 +22,7 @@ type Connection struct {
 	r            *bufio.Reader
 	server       *Server
 	w            *bufio.Writer
+	lk           sync.Mutex
 
 	funClose             func() error
 	funResetIdleTimeout  func() error
@@ -37,6 +38,10 @@ func NewConnection(server *Server, clientId string) *Connection {
 		clientId: clientId,
 		server:   server,
 	}
+}
+
+func (conn *Connection) Wait() {
+	conn.ioWait.Wait()
 }
 
 func (conn *Connection) keyLock() *KeyLock {
@@ -101,7 +106,9 @@ func (conn *Connection) readLoop() {
 				conn.clientId, conn.messageCount, err.Error())
 			return
 		}
+		conn.lk.Lock()
 		conn.LastRequestTime = time.Now()
+		conn.lk.Unlock()
 		conn.Rch <- request
 	}
 }

@@ -5,7 +5,7 @@ enum RequestType {
     Invalid = 0;
 	Ping = 1;
 	Lock = 2;
-//	Unlock = 3;
+	Unlock = 3;
 }
 
 enum ResponseStatus {
@@ -31,7 +31,6 @@ message Request {
 
 	// Ping is empty
 	RequestLock lock = 51;
-	// RequestUnlock unlock = 52;
 }
 
 message Response {

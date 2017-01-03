@@ -17,23 +17,23 @@ Protocol:
     Length-prefixed protocol buffers. Length prefix is 4 bytes, big endian binary encoding.
 
     message Request {
-        optional uint32 version = 1 [default = 2];
-        optional uint64 id = 2;
-        optional string access_token = 3;
-        optional RequestType type = 4;
+        uint32 version = 1 [default = 2];
+        uint64 id = 2;
+        string access_token = 3;
+        RequestType type = 4;
 
         // Ping is empty
-        optional RequestLock lock = 51;
-        // optional RequestUnlock unlock = 52;
+        RequestLock lock = 51;
+        // RequestUnlock unlock = 52;
     }
 
     message Response {
-        optional uint32 version = 1 [default = 2];
-        optional uint64 request_id = 2;
-        optional ResponseStatus status = 3;
-        optional string error_text = 4;
+        uint32 version = 1 [default = 2];
+        uint64 request_id = 2;
+        ResponseStatus status = 3;
+        string error_text = 4;
         repeated string keys = 5;
-        optional int64 server_unix_time = 6; // Unix timestamp
+        int64 server_unix_time = 6; // Unix timestamp
     }
 
     As of 2013-05-28, API version is 2.
@@ -43,8 +43,8 @@ Protocol:
     `type = Lock`
 
     message RequestLock {
-        optional uint64 wait_micro = 1;
-        optional uint64 release_micro = 2;
+        uint64 wait_micro = 1;
+        uint64 release_micro = 2;
         repeated string keys = 3;
     }
 
