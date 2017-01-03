@@ -1,0 +1,31 @@
+language: go
+sudo: false
+
+go:
+  - 1.7
+  - 1.6
+  - 1.5
+  - 1.4
+
+matrix:
+  include:
+  - go: 1.7
+    env: task=bench
+  - go: master
+    env: task=bench
+  - go: master
+    env: task=clean
+
+install:
+  - file=protoc-3.1.0-linux-x86_64.zip
+  - ( cd /tmp ; wget https://github.com/google/protobuf/releases/download/v3.1.0/$file )
+  - ( cd $HOME/gopath ; unzip /tmp/$file bin/protoc )
+  - go get github.com/golang/protobuf/protoc-gen-go
+
+script:
+  - if [[ "$task" == "" ]]; then exec ./all.bash test -race ; fi
+  - if [[ "$task" == "bench" ]]; then exec ./script/bench ; fi
+  - if [[ "$task" == "clean" ]]; then exec ./script/clean ; fi
+
+after_success:
+  - bash <(curl -s https://codecov.io/bash)

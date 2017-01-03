@@ -1,9 +1,9 @@
 package dlock
 
 import (
-	"code.google.com/p/goprotobuf/proto"
 	"encoding/binary"
 	"errors"
+	"github.com/golang/protobuf/proto"
 	"io"
 	"log"
 )

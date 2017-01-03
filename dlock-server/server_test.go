@@ -65,7 +65,7 @@ func TestFunctionalLock01(t *testing.T) {
 	assertNil(err)
 
 	request1 := &dlock.Request{
-		Type: dlock.RequestType_Lock.Enum(),
+		Type: dlock.RequestType_Lock,
 		Lock: &dlock.RequestLock{
 			Keys: []string{"q"},
 		},
@@ -86,7 +86,7 @@ func TestFunctionalLock01(t *testing.T) {
 	assertNil(err)
 
 	request2 := &dlock.Request{
-		Type: dlock.RequestType_Lock.Enum(),
+		Type: dlock.RequestType_Lock,
 		Lock: &dlock.RequestLock{
 			Keys: []string{"q"},
 		},

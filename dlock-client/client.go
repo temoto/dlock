@@ -102,15 +102,14 @@ func (c *Client) lock(keys []string, wait, release time.Duration) (err error) {
 	}
 
 	request := &dlock.Request{
-		Type: dlock.RequestType_Lock.Enum(),
+		Version: 2,
+		Type:    dlock.RequestType_Lock,
 		Lock: &dlock.RequestLock{
 			Keys:         keys,
-			WaitMicro:    new(uint64),
-			ReleaseMicro: new(uint64),
+			WaitMicro:    uint64(wait / time.Microsecond),
+			ReleaseMicro: uint64(release / time.Microsecond),
 		},
 	}
-	*request.Lock.WaitMicro = uint64(wait / time.Microsecond)
-	*request.Lock.ReleaseMicro = uint64(release / time.Microsecond)
 	if err = dlock.SendMessage(c.w, request); err != nil {
 		return err
 	}
@@ -139,7 +138,8 @@ func (c *Client) Ping() (err error) {
 	}
 
 	request := &dlock.Request{
-		Type: dlock.RequestType_Ping.Enum(),
+		Version: 2,
+		Type:    dlock.RequestType_Ping,
 	}
 	if err = dlock.SendMessage(c.w, request); err != nil {
 		return err
