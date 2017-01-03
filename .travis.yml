@@ -2,6 +2,7 @@ language: go
 sudo: false
 
 go:
+  - master
   - 1.7
   - 1.6
   - 1.5
@@ -21,11 +22,9 @@ install:
   - ( cd /tmp ; wget https://github.com/google/protobuf/releases/download/v3.1.0/$file )
   - ( cd $HOME/gopath ; unzip /tmp/$file bin/protoc )
   - go get github.com/golang/protobuf/protoc-gen-go
+  - go get -t -v ./...
 
 script:
-  - if [[ "$task" == "" ]]; then exec ./all.bash test -race ; fi
+  - if [[ "$task" == "" ]]; then set -e ; ./all.bash test && bash <(curl -fsS https://codecov.io/bash) ; fi
   - if [[ "$task" == "bench" ]]; then exec ./script/bench ; fi
   - if [[ "$task" == "clean" ]]; then exec ./script/clean ; fi
-
-after_success:
-  - bash <(curl -s https://codecov.io/bash)

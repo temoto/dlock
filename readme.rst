@@ -12,7 +12,7 @@ How
 
 Client-server speak very simple protocol built on Protocol Buffers [2] frames on top of TCP. Pipelining many requests before reading response is perfectly fine. Responses come in the order of requests.
 
-Protocol:
+Protocol::
 
     Length-prefixed protocol buffers. Length prefix is 4 bytes, big endian binary encoding.
 
@@ -48,15 +48,15 @@ Protocol:
         repeated string keys = 3;
     }
 
-    Supplied keys are locked until client disconnects or for `release_micro` microseconds. If release timeout is supplied, disconnect does not do anything. If some of specified keys are already locked, this command will block for at most `wait_micro` microseconds before returning response with `AcquireTimeout` status.
+Supplied keys are locked until client disconnects or for `release_micro` microseconds. If release timeout is supplied, disconnect does not do anything. If some of specified keys are already locked, this command will block for at most `wait_micro` microseconds before returning response with `AcquireTimeout` status.
 
-
-    Ping request:
+Ping request::
 
     `type = Ping`
 
-    Response is always `Ok`. Clients should send pings periodically to inform server they are alive. Otherwise the server will disconnect them with suspection of failure and release their locks.
+Response is always `Ok`. Clients should send pings periodically to inform server they are alive. Otherwise the server will disconnect them with suspection of failure and release their locks.
 
+::
 
     enum RequestType {
         Ping = 1;
@@ -84,4 +84,15 @@ References
 ==========
 
 [1] http://en.wikipedia.org/wiki/Distributed_lock_manager
+
 [2] https://code.google.com/p/protobuf/
+
+
+Flair
+=====
+
+.. image:: https://travis-ci.org/temoto/dlock.svg?branch=master
+    :target: https://travis-ci.org/temoto/dlock
+
+.. image:: https://codecov.io/gh/temoto/dlock/branch/master/graph/badge.svg
+    :target: https://codecov.io/gh/temoto/dlock
